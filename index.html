@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Sahara City</title>
+<style>
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;overflow:hidden;background:#2b1a10;color:#fff3e0;font-family:Georgia,'Times New Roman',serif}
+canvas{display:block}
+button,input{font:inherit}
+.btn{background:#e8a33d;color:#2b1a10;border:0;padding:10px 14px;border-radius:6px;font-weight:bold}
+.btn.alt{background:#4a2f1d;color:#fff3e0;border:1px solid #8a5a35}
+#auth{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(#f2b45a,#c4592b 60%,#2b1a10);z-index:10}
+#auth .box{width:min(340px,90vw);background:#2b1a10ee;padding:22px;border-radius:10px;display:flex;flex-direction:column;gap:10px}
+#auth h1{font-size:34px;letter-spacing:1px}
+#auth input{padding:10px;border-radius:6px;border:1px solid #8a5a35;background:#3d2616;color:#fff}
+#msg{color:#ff9a7a;min-height:18px;font-size:14px}
+#hud{position:fixed;top:0;left:0;right:0;display:none;justify-content:space-between;padding:10px;gap:8px;z-index:5;pointer-events:none}
+#hud>*{pointer-events:auto}
+#money{background:#2b1a10cc;padding:8px 12px;border-radius:6px;font-weight:bold}
+#bar{position:fixed;bottom:12px;left:12px;display:none;gap:8px;z-index:5}
+#pad{position:fixed;bottom:12px;right:12px;display:none;grid-template-columns:repeat(3,52px);grid-template-rows:repeat(2,52px);gap:6px;z-index:5}
+#pad button{background:#2b1a10cc;color:#fff3e0;border:1px solid #8a5a35;border-radius:8px;font-size:22px;touch-action:none}
+.panel{position:fixed;inset:8% 5%;max-width:520px;margin:auto;background:#2b1a10f2;border:1px solid #8a5a35;border-radius:10px;padding:16px;z-index:8;display:none;overflow:auto;max-height:84%}
+.panel h2{margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #4a2f1d}
+.panel input{padding:8px;border-radius:6px;border:1px solid #8a5a35;background:#3d2616;color:#fff;width:100%;margin:4px 0}
+.x{float:right}
+</style>
+</head>
+<body>
+
+<div id="auth"><div class="box">
+  <h1>Sahara City</h1>
+  <input id="em" type="email" placeholder="Email" autocomplete="email">
+  <input id="un" placeholder="Username (sign up only)">
+  <input id="pw" type="password" placeholder="Password (6+ characters)">
+  <div id="msg"></div>
+  <button class="btn" id="login">Log in</button>
+  <button class="btn alt" id="signup">Create account</button>
+</div></div>
+
+<div id="hud"><div id="money">$0</div><div id="who"></div></div>
+<div id="bar">
+  <button class="btn" id="bShop">Shop</button>
+  <button class="btn alt" id="bPhone">Phone</button>
+  <button class="btn alt" id="bMode">Drive</button>
+  <button class="btn alt" id="bAdmin" style="display:none">Admin</button>
+</div>
+<div id="pad"><span></span><button data-k="w">▲</button><span></span><button data-k="a">◀</button><button data-k="s">▼</button><button data-k="d">▶</button></div>
+
+<div class="panel" id="pShop"><button class="btn alt x" data-close>Close</button><h2>Shop</h2><div id="shopList"></div></div>
+<div class="panel" id="pPhone"><button class="btn alt x" data-close>Close</button><h2>Phone</h2><p>Garage and homes you own. Market, police calls and contacts come in the next version.</p><div id="owned"></div></div>
+<div class="panel" id="pAdmin"><button class="btn alt x" data-close>Close</button><h2>Admin</h2>
+  <input id="aUser" placeholder="Player username">
+  <input id="aAmt" type="number" placeholder="Money amount">
+  <div class="row"><button class="btn" id="aMoney">Give money</button><button class="btn alt" id="aKick">Kick</button></div>
+  <div class="row"><button class="btn alt" id="aBan">Ban</button><button class="btn alt" id="aUnban">Unban</button></div>
+  <select id="aItem" class="btn alt" style="width:100%;margin-top:6px"></select>
+  <button class="btn" id="aGive" style="margin-top:6px;width:100%">Give item free</button>
+  <div id="aMsg" style="margin-top:8px;font-size:14px"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+/* ========== SETUP: paste your Firebase config and admin email ========== */
+const firebaseConfig = {
+  apiKey: "AIzaSyBYZRaIEIC_HKz7vsbNuTsu_if18pveGXc",
+  authDomain: "sahara-city-8bfc3.firebaseapp.com",
+  projectId: "sahara-city-8bfc3",
+  storageBucket: "sahara-city-8bfc3.firebasestorage.app",
+  messagingSenderId: "1075227339347",
+  appId: "1:1075227339347:web:efe5e814e1e81a3440f4a6"
+};
+const ADMIN_EMAIL = "adlane.aby@gmail.com";
+/* Firestore rules (Firebase console > Firestore > Rules), replace the email:
+rules_version='2'; service cloud.firestore { match /databases/{d}/documents {
+ match /users/{u} {
+  allow read: if request.auth != null;
+  allow create: if request.auth.uid == u && request.resource.data.banned == false;
+  allow update: if request.auth.token.email == 'adlane.aby@gmail.com'
+    || (request.auth.uid == u && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['banned','kickAt']));
+ }}}
+*/
+
+const CATALOG = {
+  cars:[{id:'c1',name:'Old Peugeot 205',price:3000,color:0xb0b0b0},{id:'c2',name:'Toyota Hilux',price:15000,color:0x3a5f3a},{id:'c3',name:'Sport Coupe',price:60000,color:0xc0281c}],
+  houses:[{id:'h1',name:'Casbah flat, Algiers',price:20000},{id:'h2',name:'Oran seaside villa',price:90000},{id:'h3',name:'Sahara desert lodge',price:40000}]
+};
+const ALL = [...CATALOG.cars.map(x=>({...x,type:'cars'})),...CATALOG.houses.map(x=>({...x,type:'houses'}))];
+const $ = id => document.getElementById(id);
+let db, auth, me=null, ref=null, loginAt=Date.now(), THREE_started=false;
+
+try{ firebase.initializeApp(firebaseConfig); auth=firebase.auth(); db=firebase.firestore(); }
+catch(e){ $('msg').textContent='Add your Firebase config in index.html first.'; }
+
+const msg = t => $('msg').textContent = t;
+$('signup').onclick = async () => {
+  const email=$('em').value.trim(), pw=$('pw').value, name=$('un').value.trim();
+  if(name.length<3) return msg('Pick a username with 3+ characters.');
+  try{
+    const c = await auth.createUserWithEmailAndPassword(email,pw);
+    await db.collection('users').doc(c.user.uid).set({username:name,email,money:5000,cars:[],houses:[],banned:false,kickAt:0});
+  }catch(e){ msg(e.message); }
+};
+$('login').onclick = async () => {
+  try{ await auth.signInWithEmailAndPassword($('em').value.trim(),$('pw').value); }catch(e){ msg(e.message); }
+};
+
+auth && auth.onAuthStateChanged(u => {
+  if(!u){ $('auth').style.display='flex'; ['hud','bar','pad'].forEach(i=>$(i).style.display='none'); return; }
+  loginAt=Date.now();
+  ref=db.collection('users').doc(u.uid);
+  ref.onSnapshot(s=>{
+    if(!s.exists) return;
+    me=s.data(); me.uid=u.uid;
+    if(me.banned){ msg('This account is banned.'); auth.signOut(); return; }
+    if(me.kickAt && me.kickAt>loginAt){ msg('You were kicked by an admin.'); auth.signOut(); return; }
+    $('auth').style.display='none'; $('hud').style.display='flex'; $('bar').style.display='flex'; $('pad').style.display='grid';
+    $('money').textContent='$'+me.money.toLocaleString(); $('who').textContent=me.username;
+    $('bAdmin').style.display = ((u.email||'').toLowerCase()===ADMIN_EMAIL)?'inline-block':'none';
+    renderShop(); renderOwned();
+    if(!THREE_started){ THREE_started=true; startGame(); }
+  });
+});
+
+/* ---------- panels ---------- */
+const show = id => { document.querySelectorAll('.panel').forEach(p=>p.style.display='none'); $(id).style.display='block'; };
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.parentElement.style.display='none');
+$('bShop').onclick=()=>show('pShop'); $('bPhone').onclick=()=>show('pPhone'); $('bAdmin').onclick=()=>show('pAdmin');
+$('aItem').innerHTML = ALL.map(i=>`<option value="${i.type}:${i.id}">${i.name}</option>`).join('');
+
+function renderShop(){
+  $('shopList').innerHTML = ALL.map(i=>{
+    const has=(me[i.type]||[]).includes(i.id);
+    return `<div class="row"><span>${i.name}<br><small>$${i.price.toLocaleString()}</small></span>
+      <button class="btn" ${has?'disabled':''} onclick="buy('${i.type}','${i.id}')">${has?'Owned':'Buy'}</button></div>`;
+  }).join('');
+}
+function renderOwned(){
+  const list = ALL.filter(i=>(me[i.type]||[]).includes(i.id));
+  $('owned').innerHTML = list.length ? list.map(i=>`<div class="row">${i.name}</div>`).join('') : '<div class="row">Nothing yet. Visit the shop.</div>';
+}
+window.buy = async (type,id) => {
+  const item = ALL.find(i=>i.type===type&&i.id===id);
+  if(me.money<item.price) return alert('Not enough money.');
+  await ref.update({money:firebase.firestore.FieldValue.increment(-item.price),[type]:firebase.firestore.FieldValue.arrayUnion(id)});
+};
+
+/* ---------- admin ---------- */
+async function findUser(){
+  const n=$('aUser').value.trim();
+  const q=await db.collection('users').where('username','==',n).limit(1).get();
+  if(q.empty){ $('aMsg').textContent='Player not found.'; return null; }
+  return q.docs[0].ref;
+}
+const done = t => $('aMsg').textContent=t;
+$('aMoney').onclick=async()=>{const r=await findUser(); if(r){await r.update({money:firebase.firestore.FieldValue.increment(+$('aAmt').value||0)}); done('Money sent.');}};
+$('aKick').onclick=async()=>{const r=await findUser(); if(r){await r.update({kickAt:Date.now()}); done('Player kicked.');}};
+$('aBan').onclick=async()=>{const r=await findUser(); if(r){await r.update({banned:true}); done('Player banned.');}};
+$('aUnban').onclick=async()=>{const r=await findUser(); if(r){await r.update({banned:false}); done('Player unbanned.');}};
+$('aGive').onclick=async()=>{const r=await findUser(); if(!r) return; const [t,id]=$('aItem').value.split(':');
+  await r.update({[t]:firebase.firestore.FieldValue.arrayUnion(id)}); done('Item given.');};
+
+/* ---------- 3D world ---------- */
+function startGame(){
+  const scene=new THREE.Scene();
+  scene.background=new THREE.Color(0xf0c27a); scene.fog=new THREE.Fog(0xf0c27a,60,260);
+  const cam=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,0.1,600);
+  const r=new THREE.WebGLRenderer({antialias:true}); r.setSize(innerWidth,innerHeight); r.setPixelRatio(Math.min(devicePixelRatio,2));
+  document.body.prepend(r.domElement);
+  scene.add(new THREE.HemisphereLight(0xfff0d0,0x8a5a35,0.9));
+  const sun=new THREE.DirectionalLight(0xffe0a0,0.8); sun.position.set(80,120,40); scene.add(sun);
+  const mat=c=>new THREE.MeshLambertMaterial({color:c});
+  const add=(g,c,x,y,z)=>{const m=new THREE.Mesh(g,mat(c)); m.position.set(x,y,z); scene.add(m); return m;};
+
+  add(new THREE.PlaneGeometry(900,900).rotateX(-Math.PI/2),0xe3b872,0,0,0);          // desert
+  add(new THREE.PlaneGeometry(900,300).rotateX(-Math.PI/2),0x1f7fa8,0,0.05,330);       // Mediterranean
+  add(new THREE.PlaneGeometry(900,20).rotateX(-Math.PI/2),0xf5dfa8,0,0.04,170);        // beach
+  for(let i=0;i<14;i++) add(new THREE.ConeGeometry(30+Math.random()*30,40+Math.random()*50,6),0x7a5a40,-400+i*60,25,-240-Math.random()*60); // Atlas mountains
+  add(new THREE.PlaneGeometry(14,300).rotateX(-Math.PI/2),0x333333,0,0.06,0);          // roads
+  add(new THREE.PlaneGeometry(300,14).rotateX(-Math.PI/2),0x333333,0,0.06,0);
+  for(let i=0;i<70;i++){ // white-washed city blocks
+    const x=(Math.random()-.5)*260,z=(Math.random()-.5)*260; if(Math.abs(x)<14||Math.abs(z)<14) continue;
+    const h=6+Math.random()*22; add(new THREE.BoxGeometry(10,h,10),i%3?0xf4efe4:0xd9c7a8,x,h/2,z);
+  }
+  for(let i=0;i<40;i++){ // palms
+    const x=(Math.random()-.5)*300,z=40+Math.random()*125; if(Math.abs(x)<8) continue;
+    add(new THREE.CylinderGeometry(.4,.6,7),0x6b4a2a,x,3.5,z); add(new THREE.SphereGeometry(2.6,6,4),0x2e7d32,x,8,z);
+  }
+  add(new THREE.BoxGeometry(14,8,10),0xc4592b,26,4,16);   // car dealer
+  add(new THREE.BoxGeometry(14,8,10),0x2e6f95,-26,4,16);  // real estate
+
+  const player=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1,1.8,.6),mat(0x2d4a7a)); body.position.y=1.3; player.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.45,8,6),mat(0xc68642)); head.position.y=2.5; player.add(head);
+  const car=new THREE.Group();
+  const cb=new THREE.Mesh(new THREE.BoxGeometry(2.4,1,4.6),mat(0xb0b0b0)); cb.position.y=.9; car.add(cb);
+  const cr=new THREE.Mesh(new THREE.BoxGeometry(2,.8,2.2),mat(0x222222)); cr.position.set(0,1.7,-.2); car.add(cr);
+  car.visible=false; scene.add(player,car); player.position.set(0,0,10);
+
+  let driving=false, heading=0, speed=0; const keys={};
+  addEventListener('keydown',e=>keys[e.key.toLowerCase()]=1); addEventListener('keyup',e=>keys[e.key.toLowerCase()]=0);
+  document.querySelectorAll('#pad button').forEach(b=>{const k=b.dataset.k;
+    const on=e=>{e.preventDefault();keys[k]=1},off=e=>{e.preventDefault();keys[k]=0};
+    b.addEventListener('pointerdown',on); b.addEventListener('pointerup',off); b.addEventListener('pointerleave',off);});
+
+  $('bMode').onclick=()=>{
+    const owned=CATALOG.cars.filter(c=>(me.cars||[]).includes(c.id));
+    if(!driving){
+      if(!owned.length) return alert('Buy a car in the shop first.');
+      const best=owned[owned.length-1]; cb.material.color.set(best.color);
+      car.position.copy(player.position); car.rotation.y=heading; car.visible=true; player.visible=false; driving=true; $('bMode').textContent='Walk';
+    } else { player.position.copy(car.position).add(new THREE.Vector3(3,0,0)); car.visible=false; player.visible=true; driving=false; speed=0; $('bMode').textContent='Drive'; }
+  };
+
+  const clock=new THREE.Clock();
+  (function loop(){
+    requestAnimationFrame(loop); const dt=Math.min(clock.getDelta(),.05);
+    const fwd=(keys.w||keys.arrowup)?1:(keys.s||keys.arrowdown)?-1:0, turn=(keys.a||keys.arrowleft)?1:(keys.d||keys.arrowright)?-1:0;
+    const obj=driving?car:player;
+    if(driving){ speed+=fwd*40*dt; speed*=0.985; if(!fwd) speed*=0.97; heading+=turn*dt*1.8*Math.sign(speed||1)*Math.min(1,Math.abs(speed)/8); }
+    else { heading+=turn*dt*2.4; speed=fwd*9; }
+    obj.rotation.y=heading;
+    obj.position.x+=Math.sin(heading)*speed*dt; obj.position.z+=Math.cos(heading)*speed*dt;
+    obj.position.z=Math.min(obj.position.z,168); // sea boundary
+    obj.position.x=Math.max(-440,Math.min(440,obj.position.x)); obj.position.z=Math.max(-200,obj.position.z);
+    const d=driving?12:8, t=obj.position;
+    cam.position.set(t.x-Math.sin(heading)*d,t.y+(driving?5:4),t.z-Math.cos(heading)*d); cam.lookAt(t.x,t.y+2,t.z);
+    r.render(scene,cam);
+  })();
+  addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight);});
+}
+</script>
+</body>
+</html>
